@@ -40,7 +40,7 @@ public class FlowAspect {
     @Autowired
     private Set<Prediction> predictions;
 
-    private static Map<String,List<String>> countActionUser = new HashMap<>();
+    public static Map<String,List<String>> countActionUser = new HashMap<>();
 
     private List<Action> actions = new LinkedList<>();
 
