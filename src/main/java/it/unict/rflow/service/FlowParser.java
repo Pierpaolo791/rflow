@@ -28,7 +28,8 @@ public class FlowParser {
         String[] flowSplitted = flow.split("->");
         List<String> sources = Arrays.asList(flowSplitted[0].split(",")).stream().collect(Collectors.toList());
         Method target = mapCrudMethods.get(flowSplitted[1]);
-        return Prediction.builder().sources(sources).target(target).build();
+        String source = sources.stream().findFirst().orElse("");
+        return Prediction.builder().source(source).target(target).build();
     }
 
 

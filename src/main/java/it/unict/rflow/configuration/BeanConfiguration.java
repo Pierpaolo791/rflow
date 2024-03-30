@@ -60,7 +60,7 @@ public class BeanConfiguration {
         return new CrudMethodService();
     }*/
 
-    @Value("${flow:}")
+    @Value("${rflow.flow:}")
     private String flowInAppProperties;
 
     @Bean

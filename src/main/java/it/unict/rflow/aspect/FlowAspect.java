@@ -22,13 +22,14 @@ import java.lang.reflect.Parameter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Aspect
 @Component
 public class FlowAspect {
 
-    @Value("${sessionCookieName:aopSessionId}")
+    @Value("${rflow.sessioncookiename:aopSessionId}")
     private String sessionCookieName;
 
     @Autowired
@@ -44,10 +45,39 @@ public class FlowAspect {
 
     private List<Action> actions = new LinkedList<>();
 
+    private Map<String,Prediction> calculatedPrediction = new HashMap<>();
+
+
+    @Value("#{new Boolean('${rflow.predict:false}')}")
+    private Boolean predict;
+
     private AtomicBoolean stop = new AtomicBoolean(false);
 
     @Pointcut("@within(org.springframework.web.bind.annotation.RestController)")
     public void pointcutController() {}
+
+    @Before("pointcutController()")
+    public void getPrediction(JoinPoint joinPoint) throws Exception {
+        if (stop.get() && !predict.booleanValue()) return;
+        //if (countActionUser. < 6) return;
+        Cookie cookie = getCookieSession();
+        List<String> requests = countActionUser.get(cookie.getValue());
+        List<String> nextRequests = new LinkedList<>();
+        if (requests == null || requests.isEmpty() || requests.size() < 2) return;
+        for (int i=0; i<requests.size()-1; i++)
+            if (requests.get(i).equals(joinPoint.getStaticPart().getSignature().getName()))
+                nextRequests.add(requests.get(i+1));
+        Map<String, Integer> occurrences = new HashMap<>();
+
+        for (String element : nextRequests) {
+            occurrences.put(element, occurrences.getOrDefault(element, 0) + 1);
+        }
+        // Stampiamo le occorrenze
+        for (Map.Entry<String, Integer> entry : occurrences.entrySet()) {
+            System.out.println("Elemento: " + entry.getKey() + ", Occorrenze: " + entry.getValue());
+        }
+        //if (!predictions.contains(prediction)) predictions.add(prediction);
+    }
 
     @Around("pointcutController()")
     public Object readCookie(ProceedingJoinPoint joinPoint) throws Throwable {
@@ -76,10 +106,10 @@ public class FlowAspect {
     }
     @After("pointcutController()")
     public void countRequest(JoinPoint joinPoint) throws Exception {
-        if (stop.get()) return;
+        if (stop.get() && !predict.booleanValue()) return;
         Cookie cookie = getCookieSession();
         List<String> list = new ArrayList<>();
-        list.add(joinPoint.getSignature().toShortString());
+        list.add(joinPoint.getStaticPart().getSignature().getName());
         if(!countActionUser.containsKey(cookie.getValue())) countActionUser.put(cookie.getValue(),list);
         else countActionUser.get(cookie.getValue()).addAll(list);
     }
@@ -91,7 +121,7 @@ public class FlowAspect {
     }
 
     private void checkPredictionAndRun(String methodName, Object[] args) {
-        predictions.stream().filter(x -> x.getSources().contains(methodName)).findAny().ifPresent(
+        predictions.stream().filter(x -> x.getSource().equals(methodName)).findAny().ifPresent(
                 prediction -> {
                     Method m = prediction.getTarget();
                     generateAction(methodName, args, m);

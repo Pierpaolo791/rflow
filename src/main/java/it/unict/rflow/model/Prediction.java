@@ -12,8 +12,17 @@ import java.util.List;
 @Setter
 public class Prediction {
 
-
-    private final List<String> sources;
+    private final String source;
     private final Method target;
+
+    @Override
+    public boolean equals(Object o) {
+        if (o instanceof Prediction ) {
+            Prediction p = (Prediction) o;
+            if (p == null || p.getSource() == null || p.getTarget() == null) return false;
+            if (p.source.equals(this.source) && p.target.equals(this.target) ) return true;
+        }
+        return false;
+    }
 
 }
