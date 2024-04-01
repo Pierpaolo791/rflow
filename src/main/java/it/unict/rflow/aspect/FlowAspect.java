@@ -22,7 +22,6 @@ import java.lang.reflect.Parameter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Aspect
@@ -41,6 +40,8 @@ public class FlowAspect {
     @Autowired
     private Set<Prediction> predictions;
 
+    public static Map<String,Prediction> predictionMap = new HashMap<>();
+
     public static Map<String,List<String>> countActionUser = new HashMap<>();
 
     private List<Action> actions = new LinkedList<>();
@@ -51,13 +52,23 @@ public class FlowAspect {
     @Value("#{new Boolean('${rflow.predict:false}')}")
     private Boolean predict;
 
-    private AtomicBoolean stop = new AtomicBoolean(false);
+    public static AtomicBoolean stop = new AtomicBoolean(false);
+
 
     @Pointcut("@within(org.springframework.web.bind.annotation.RestController)")
     public void pointcutController() {}
 
-    @Before("pointcutController()")
+
+    @Pointcut("@annotation(org.springframework.web.bind.annotation.GetMapping)" +
+            "|| @annotation(org.springframework.web.bind.annotation.PostMapping)" +
+            "|| @annotation(org.springframework.web.bind.annotation.PatchMapping)" +
+            "|| @annotation(org.springframework.web.bind.annotation.PutMapping)" +
+            "|| @annotation(org.springframework.web.bind.annotation.DeleteMapping)")
+    public void pointcutMethodController() {}
+
+    @Before("pointcutController() && pointcutMethodController()")
     public void getPrediction(JoinPoint joinPoint) throws Exception {
+
         if (stop.get() && !predict.booleanValue()) return;
         //if (countActionUser. < 6) return;
         Cookie cookie = getCookieSession();
@@ -68,18 +79,27 @@ public class FlowAspect {
             if (requests.get(i).equals(joinPoint.getStaticPart().getSignature().getName()))
                 nextRequests.add(requests.get(i+1));
         Map<String, Integer> occurrences = new HashMap<>();
-
+        if (nextRequests == null || nextRequests.isEmpty() || nextRequests.size() < 2) return;
         for (String element : nextRequests) {
             occurrences.put(element, occurrences.getOrDefault(element, 0) + 1);
         }
         // Stampiamo le occorrenze
+        String maxPrediction = new String();
+        Integer max = 0;
         for (Map.Entry<String, Integer> entry : occurrences.entrySet()) {
+            if (entry.getValue() > max) {
+                maxPrediction = entry.getKey();
+                max = entry.getValue();
+            }
             System.out.println("Elemento: " + entry.getKey() + ", Occorrenze: " + entry.getValue());
         }
+        Prediction prediction = Prediction.builder().source( joinPoint.getStaticPart().getSignature().getName())
+                        .target(crudMethodService.getMethodByName(maxPrediction)).build();
+        predictionMap.put(cookie.getValue(), prediction);
         //if (!predictions.contains(prediction)) predictions.add(prediction);
     }
 
-    @Around("pointcutController()")
+    @Around("pointcutController() && pointcutMethodController()")
     public Object readCookie(ProceedingJoinPoint joinPoint) throws Throwable {
         if (stop.get()) return joinPoint.proceed();
         try {
@@ -104,7 +124,7 @@ public class FlowAspect {
         }
         return joinPoint.proceed();
     }
-    @After("pointcutController()")
+    @After("pointcutController() && pointcutMethodController()")
     public void countRequest(JoinPoint joinPoint) throws Exception {
         if (stop.get() && !predict.booleanValue()) return;
         Cookie cookie = getCookieSession();
@@ -114,7 +134,7 @@ public class FlowAspect {
         else countActionUser.get(cookie.getValue()).addAll(list);
     }
 
-    @After("pointcutController()")
+    @After("pointcutController() && pointcutMethodController()")
     public void prepareA(JoinPoint joinPoint) throws Exception {
         if (stop.get()) return;
         checkPredictionAndRun(joinPoint.getSignature().getName(), joinPoint.getArgs());
@@ -127,6 +147,14 @@ public class FlowAspect {
                     generateAction(methodName, args, m);
                 }
         );
+        try {
+            Cookie cookie = getSessionCookie();
+            Prediction p = predictionMap.get(cookie.getValue());
+            if (p != null && p.getSource().equals(methodName))
+                generateAction(methodName,args, p.getTarget());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void generateAction(String methodName, Object[] args, Method m) {
