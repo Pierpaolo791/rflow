@@ -15,6 +15,7 @@ public class BatchMonitoring {
     @Scheduled(fixedDelayString = "${rflow.refreshtime:600000}")
     public void schedule() {
         FlowAspect.countActionUser.clear();
+        FlowAspect.predictionMap.clear();
         System.out.println("LOGGING: pulita la mappa delle azioni");
     }
 
