@@ -1,9 +1,14 @@
 package it.unict.rflow.model;
 
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.lang.reflect.Method;
-
+@Setter
+@Getter
+@NoArgsConstructor
 public class Action {
 
     private String sessionId;
@@ -13,55 +18,4 @@ public class Action {
     private Object objectResponse;
     private String targetMethodName;
 
-    public Action() {
-
-    }
-
-    public String getSessionId() {
-        return sessionId;
-    }
-
-    public void setSessionId(String sessionId) {
-        this.sessionId = sessionId;
-    }
-
-    public Method getMethod() {
-        return method;
-    }
-
-    public void setMethod(Method method) {
-        this.method = method;
-    }
-
-    public HttpServletRequest getRequest() {
-        return request;
-    }
-
-    public void setRequest(HttpServletRequest request) {
-        this.request = request;
-    }
-
-    public String getRequestId() {
-        return requestId;
-    }
-
-    public void setRequestId(String requestId) {
-        this.requestId = requestId;
-    }
-
-    public Object getObjectResponse() {
-        return objectResponse;
-    }
-
-    public void setObjectResponse(Object objectResponse) {
-        this.objectResponse = objectResponse;
-    }
-
-    public String getTargetMethodName() {
-        return targetMethodName;
-    }
-
-    public void setTargetMethodName(String targetMethodName) {
-        this.targetMethodName = targetMethodName;
-    }
 }

@@ -24,40 +24,25 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
+import static it.unict.rflow.aspect.MonitoringAspect.predictionMap;
+
 @Aspect
 @Component
 public class FlowAspect {
 
-    @Value("${rflow.sessioncookiename:aopSessionId}")
+    @Value("${rflow.sessioncookiename:rflowsession}")
     private String sessionCookieName;
-
     @Autowired
     private ApplicationContext applicationContext;
-
     @Autowired
     private CrudMethodService crudMethodService;
-
     @Autowired
-    private Set<Prediction> predictions;
-
-    public static Map<String,Prediction> predictionMap = new HashMap<>();
-
-    public static Map<String,List<String>> countActionUser = new HashMap<>();
-
-    private List<Action> actions = new LinkedList<>();
-
-    private Map<String,Prediction> calculatedPrediction = new HashMap<>();
-
-
-    @Value("#{new Boolean('${rflow.predict:false}')}")
-    private Boolean predict;
-
+    private Set<Prediction> flowSet;
+    private final List<Action> actions = new LinkedList<>();
     public static AtomicBoolean stop = new AtomicBoolean(false);
-
 
     @Pointcut("@within(org.springframework.web.bind.annotation.RestController)")
     public void pointcutController() {}
-
 
     @Pointcut("@annotation(org.springframework.web.bind.annotation.GetMapping)" +
             "|| @annotation(org.springframework.web.bind.annotation.PostMapping)" +
@@ -66,82 +51,38 @@ public class FlowAspect {
             "|| @annotation(org.springframework.web.bind.annotation.DeleteMapping)")
     public void pointcutMethodController() {}
 
-    @Before("pointcutController() && pointcutMethodController()")
-    public void getPrediction(JoinPoint joinPoint) throws Exception {
-
-        if (stop.get() && !predict.booleanValue()) return;
-        //if (countActionUser. < 6) return;
-        Cookie cookie = getCookieSession();
-        List<String> requests = countActionUser.get(cookie.getValue());
-        List<String> nextRequests = new LinkedList<>();
-        if (requests == null || requests.isEmpty() || requests.size() < 2) return;
-        for (int i=0; i<requests.size()-1; i++)
-            if (requests.get(i).equals(joinPoint.getStaticPart().getSignature().getName()))
-                nextRequests.add(requests.get(i+1));
-        Map<String, Integer> occurrences = new HashMap<>();
-        if (nextRequests == null || nextRequests.isEmpty() || nextRequests.size() < 2) return;
-        for (String element : nextRequests) {
-            occurrences.put(element, occurrences.getOrDefault(element, 0) + 1);
-        }
-        // Stampiamo le occorrenze
-        String maxPrediction = new String();
-        Integer max = 0;
-        for (Map.Entry<String, Integer> entry : occurrences.entrySet()) {
-            if (entry.getValue() > max) {
-                maxPrediction = entry.getKey();
-                max = entry.getValue();
-            }
-            System.out.println("Elemento: " + entry.getKey() + ", Occorrenze: " + entry.getValue());
-        }
-        Prediction prediction = Prediction.builder().source( joinPoint.getStaticPart().getSignature().getName())
-                        .target(crudMethodService.getMethodByName(maxPrediction)).build();
-        predictionMap.put(cookie.getValue(), prediction);
-        //if (!predictions.contains(prediction)) predictions.add(prediction);
-    }
 
     @Around("pointcutController() && pointcutMethodController()")
-    public Object readCookie(ProceedingJoinPoint joinPoint) throws Throwable {
+    public Object getResponseIfPresent(ProceedingJoinPoint joinPoint) throws Throwable {
         if (stop.get()) return joinPoint.proceed();
         try {
             final Cookie sessionCookie = getSessionCookie();
             Optional<Action> actionTarget =
-                    actions.stream().filter(action -> action.getTargetMethodName().equals(joinPoint.getSignature().getName()) &&
+                    actions.stream().filter(action -> action.getTargetMethodName().equals(
+                            joinPoint.getSignature().getName()) &&
                             action.getSessionId().equals(sessionCookie.getValue())).findAny();
             if (actionTarget.isPresent()) {
                 Action action = actionTarget.get();
                 final Object response = action.getObjectResponse();
-                //Spiegare al prof il removeIf in questo caso e del perché potrebbe essere utile
                 actions.removeIf(act -> act.getTargetMethodName().equals(joinPoint.getSignature().getName()) &&
                         act.getSessionId().equals(sessionCookie.getValue()));
                 actions.remove(action);
                 return response;
             }
-
         } catch(Exception e) {
             if (getHttpServletResponseFromCurrentRequest() != null)
                 getHttpServletResponseFromCurrentRequest().addCookie(getCookieByNewSessionWithRandomUuid());
-            System.out.println("Settato un nuovo cookie di sessione all'utente corrente");
         }
         return joinPoint.proceed();
     }
     @After("pointcutController() && pointcutMethodController()")
-    public void countRequest(JoinPoint joinPoint) throws Exception {
-        if (stop.get() && !predict.booleanValue()) return;
-        Cookie cookie = getCookieSession();
-        List<String> list = new ArrayList<>();
-        list.add(joinPoint.getStaticPart().getSignature().getName());
-        if(!countActionUser.containsKey(cookie.getValue())) countActionUser.put(cookie.getValue(),list);
-        else countActionUser.get(cookie.getValue()).addAll(list);
-    }
-
-    @After("pointcutController() && pointcutMethodController()")
-    public void prepareA(JoinPoint joinPoint) throws Exception {
+    public void prepareFutureAction(JoinPoint joinPoint) throws Exception {
         if (stop.get()) return;
         checkPredictionAndRun(joinPoint.getSignature().getName(), joinPoint.getArgs());
     }
 
     private void checkPredictionAndRun(String methodName, Object[] args) {
-        predictions.stream().filter(x -> x.getSource().equals(methodName)).findAny().ifPresent(
+        flowSet.stream().filter(x -> x.getSource().equals(methodName)).findAny().ifPresent(
                 prediction -> {
                     Method m = prediction.getTarget();
                     generateAction(methodName, args, m);
@@ -176,7 +117,6 @@ public class FlowAspect {
             }
         });
     }
-
     private Action initAction(String methodName, Object[] args, Method m) {
         Action action = new Action();
         action.setRequest(getCurrentRequest());
@@ -194,17 +134,17 @@ public class FlowAspect {
     private Object[] getParamsShared(Method target, String methodNameSource, Object[] sourceValue) {
         Parameter[] paramsSource = crudMethodService.getMethodByName(methodNameSource).getParameters();
         Parameter[] paramsTarget = target.getParameters();
-        Object[] targetValue = getValueOfTarget(sourceValue, paramsTarget, paramsSource);
-        return targetValue;
+        return getValuesOfTarget(sourceValue, paramsTarget, paramsSource);
     }
 
-    private Object[] getValueOfTarget(Object[] sourceValue, Parameter[] paramsTarget, Parameter[] paramsSource) {
-        Object[] targetValue = new Object[paramsTarget.length];
+    private Object[] getValuesOfTarget(Object[] sourceValue, Parameter[] paramsTarget, Parameter[] paramsSource) {
+        Object[] targetValues = new Object[paramsTarget.length];
         for (int i = 0; i< paramsTarget.length; i++)
             for (int j = 0; j< paramsSource.length; j++)
-                if(paramsTarget[i].getName().equals(paramsSource[j].getName()) && paramsTarget[i].getType().equals(paramsSource[j].getType()))
-                    targetValue[i] = sourceValue[j];
-        return targetValue;
+                if(paramsTarget[i].getName().equals(paramsSource[j].getName()) && paramsTarget[i].getType()
+                        .equals(paramsSource[j].getType()))
+                    targetValues[i] = sourceValue[j];
+        return targetValues;
     }
 
     private Cookie getCookieSession() throws Exception {
